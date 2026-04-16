@@ -1,8 +1,8 @@
 # claude-model-router
 
-Switch between Claude and any Anthropic-compatible model provider inside a single Claude Code session — no restarts, no reconfiguring.
+Switch between Claude, MiMo, Kimi, and other third-party models inside a single Claude Code session — no restarts, no reconfiguring.
 
-A tiny Node.js proxy sits between Claude Code and the model APIs. It reads the model name from each request and routes it to the right provider. You configure providers in a JSON file — no code changes needed to add one.
+A tiny Node.js proxy sits between Claude Code and the model APIs. It reads the model name from each request and routes it to the right provider. Add any provider in a JSON file — no code changes needed.
 
 ```
 /model opus           → Anthropic (your normal Claude auth, passthrough)
