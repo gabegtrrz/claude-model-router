@@ -1,26 +1,39 @@
 import { createServer } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PORT = parseInt(process.env.CLAUDE_PROXY_PORT || "8377");
+const __dir = dirname(fileURLToPath(import.meta.url));
 
-// Route table: model prefix → { host, basePath, apiKey (null = passthrough) }
+// Load routes from routes.json next to this script.
+// Override location with CLAUDE_PROXY_ROUTES env var.
+const routesPath = process.env.CLAUDE_PROXY_ROUTES
+  ? resolve(process.env.CLAUDE_PROXY_ROUTES)
+  : resolve(__dir, "routes.json");
+
+let configuredRoutes = [];
+try {
+  const config = JSON.parse(readFileSync(routesPath, "utf8"));
+  configuredRoutes = config.routes.map((r) => ({
+    prefix: r.prefix,
+    match: (model) => model?.startsWith(r.prefix),
+    host: r.host,
+    basePath: r.basePath ?? "",
+    apiKey: process.env[r.apiKeyEnv] ?? null,
+    name: r.name ?? r.prefix,
+  }));
+} catch (err) {
+  console.error(`[proxy] Failed to load routes from ${routesPath}: ${err.message}`);
+  console.error(`[proxy] Create a routes.json file next to this script. See README.`);
+  process.exit(1);
+}
+
+// Anthropic is always the fallback — passthrough auth, no key override.
 const routes = [
+  ...configuredRoutes,
   {
-    match: (model) => model?.startsWith("mimo"),
-    host: "api.xiaomimimo.com",
-    basePath: "/anthropic",
-    apiKey: process.env.MIMO_API_KEY,
-    name: "MiMo",
-  },
-  {
-    match: (model) => model?.startsWith("kimi"),
-    host: "api.moonshot.ai",
-    basePath: "/anthropic",
-    apiKey: process.env.KIMI_API_KEY,
-    name: "Kimi",
-  },
-  {
-    // Default: Anthropic — passthrough auth (OAuth/API key from Claude Code)
     match: () => true,
     host: "api.anthropic.com",
     basePath: "",
@@ -37,17 +50,12 @@ function extractModel(body) {
   }
 }
 
-function findRoute(model) {
-  return routes.find((r) => r.match(model));
-}
-
 const server = createServer((req, res) => {
   let body = "";
   req.on("data", (chunk) => (body += chunk));
   req.on("end", () => {
     const model = extractModel(body);
-    const route = findRoute(model);
-
+    const route = routes.find((r) => r.match(model));
     const targetPath = route.basePath + req.url;
 
     const headers = { ...req.headers };
@@ -66,13 +74,7 @@ const server = createServer((req, res) => {
     }
 
     const proxyReq = httpsRequest(
-      {
-        hostname: route.host,
-        port: 443,
-        path: targetPath,
-        method: req.method,
-        headers,
-      },
+      { hostname: route.host, port: 443, path: targetPath, method: req.method, headers },
       (proxyRes) => {
         res.writeHead(proxyRes.statusCode, proxyRes.headers);
         proxyRes.pipe(res);
@@ -92,7 +94,10 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`Claude model proxy on http://127.0.0.1:${PORT}`);
-  console.log(`  mimo-*  → api.xiaomimimo.com (key from MIMO_API_KEY)`);
-  console.log(`  kimi-*  → api.moonshot.ai    (key from KIMI_API_KEY)`);
-  console.log(`  *       → api.anthropic.com  (passthrough auth)`);
+  console.log(`  Routes loaded from: ${routesPath}`);
+  for (const r of configuredRoutes) {
+    const keyStatus = r.apiKey ? "key set" : "WARNING: no key";
+    console.log(`  ${r.name.padEnd(20)} "${r.prefix}*" → ${r.host} (${keyStatus})`);
+  }
+  console.log(`  ${"Anthropic (fallback)".padEnd(20)} * → api.anthropic.com (passthrough auth)`);
 });

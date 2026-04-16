@@ -15,6 +15,14 @@ Copy-Item "$PSScriptRoot\claude-proxy.mjs"  "$bin\claude-proxy.mjs"  -Force
 Copy-Item "$PSScriptRoot\claude-multi.cmd"  "$bin\claude-multi.cmd"  -Force
 Copy-Item "$PSScriptRoot\claude-mimo.cmd"   "$bin\claude-mimo.cmd"   -Force
 Copy-Item "$PSScriptRoot\claude-kimi.cmd"   "$bin\claude-kimi.cmd"   -Force
+
+# Copy routes.json only if one doesn't already exist (don't overwrite user's config)
+if (-not (Test-Path "$bin\routes.json")) {
+    Copy-Item "$PSScriptRoot\routes.json" "$bin\routes.json"
+    Write-Host "Copied routes.json to $bin (edit this to add providers)"
+} else {
+    Write-Host "routes.json already exists at $bin, skipping (your config is safe)"
+}
 Write-Host "Copied scripts to $bin"
 
 # Add launcher functions to PowerShell profile (if not already there)

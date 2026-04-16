@@ -1,13 +1,14 @@
 # claude-model-router
 
-Switch between Claude, MiMo, and Kimi inside a single Claude Code session — no restarts, no reconfiguring.
+Switch between Claude and any Anthropic-compatible model provider inside a single Claude Code session — no restarts, no reconfiguring.
 
-A tiny Node.js proxy sits between Claude Code and the model APIs. It reads the model name from each request and routes it to the right provider automatically.
+A tiny Node.js proxy sits between Claude Code and the model APIs. It reads the model name from each request and routes it to the right provider. You configure providers in a JSON file — no code changes needed to add one.
 
 ```
-/model opus          → Anthropic (your normal Claude auth)
-/model mimo-v2-pro   → Xiaomi MiMo
-/model kimi-k2.5     → Moonshot Kimi
+/model opus           → Anthropic (your normal Claude auth, passthrough)
+/model mimo-v2-pro    → Xiaomi MiMo
+/model kimi-k2.5      → Moonshot Kimi
+/model <anything>     → whatever you configure in routes.json
 ```
 
 **Windows only** (PowerShell + `.cmd` launchers). Requires Node.js 18+.
@@ -22,9 +23,11 @@ cd claude-model-router
 .\install.ps1
 ```
 
-The installer copies the scripts to `~/bin` and adds launcher functions to your PowerShell profile.
+This copies the scripts to `~/bin`, copies `routes.json` to `~/bin` (your editable config), and adds launcher functions to your PowerShell profile.
 
 ### Set your API keys
+
+Keys are stored as Windows user environment variables — nothing is hardcoded anywhere.
 
 ```powershell
 [Environment]::SetEnvironmentVariable("MIMO_API_KEY", "sk-your-key", "User")
@@ -43,7 +46,7 @@ Open a new terminal tab. Done.
 claude-multi
 ```
 
-Then inside the session:
+Then inside Claude Code, switch models with `/model`:
 
 | Command | Routes to |
 |---------|-----------|
@@ -52,7 +55,7 @@ Then inside the session:
 | `/model mimo-v2-pro` | Xiaomi MiMo V2 Pro |
 | `/model kimi-k2.5` | Moonshot Kimi K2.5 |
 
-Flags pass through normally:
+All flags pass through:
 
 ```powershell
 claude-multi --dangerously-skip-permissions --chrome
@@ -60,7 +63,7 @@ claude-multi --dangerously-skip-permissions --chrome
 
 ### Single-model launchers
 
-If you just want one provider per session:
+For when you want one provider and no proxy overhead:
 
 ```powershell
 claude        # Claude (default, no proxy)
@@ -70,55 +73,95 @@ claude-kimi   # Kimi only
 
 ---
 
+## Adding a provider
+
+Edit `~/bin/routes.json`:
+
+```json
+{
+  "routes": [
+    {
+      "prefix": "mimo",
+      "name": "Xiaomi MiMo",
+      "host": "api.xiaomimimo.com",
+      "basePath": "/anthropic",
+      "apiKeyEnv": "MIMO_API_KEY"
+    },
+    {
+      "prefix": "kimi",
+      "name": "Moonshot Kimi",
+      "host": "api.moonshot.ai",
+      "basePath": "/anthropic",
+      "apiKeyEnv": "KIMI_API_KEY"
+    },
+    {
+      "prefix": "my-model",
+      "name": "My Provider",
+      "host": "api.myprovider.com",
+      "basePath": "/anthropic",
+      "apiKeyEnv": "MY_PROVIDER_API_KEY"
+    }
+  ]
+}
+```
+
+**Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `prefix` | yes | Model name prefix to match (e.g. `"mimo"` matches `mimo-v2-pro`, `mimo-*`) |
+| `host` | yes | API hostname |
+| `basePath` | no | Path prefix before the endpoint (e.g. `"/anthropic"`) |
+| `name` | no | Display name shown in proxy logs |
+| `apiKeyEnv` | yes | Name of the env var holding the API key |
+
+Routes are matched in order — first match wins. Anthropic is always the final fallback.
+
+The provider must expose an **Anthropic-compatible API** (i.e. `/anthropic/v1/messages`). Most major providers do.
+
+---
+
 ## How it works
 
-`claude-multi` starts `claude-proxy.mjs` as a background process, points `ANTHROPIC_BASE_URL` at it (`http://127.0.0.1:8377`), then launches Claude Code.
+`claude-multi` starts `claude-proxy.mjs` in a minimized background window, points `ANTHROPIC_BASE_URL` at it (`http://127.0.0.1:8377`), then launches Claude Code.
 
-For every API request, the proxy:
-1. Reads the `model` field from the request body
-2. Matches it against the route table
-3. Forwards to the right host with the right auth header
+For every request:
+1. The proxy reads the `model` field from the request body
+2. Matches it against your `routes.json`
+3. Forwards to the right host, swapping in the provider's API key
 
-Anthropic requests pass through with the original auth untouched — so your Claude subscription or API key just works. Third-party providers get their own key injected from env vars.
-
-The proxy window is minimized while you work and killed when Claude Code exits.
+Anthropic requests pass through with the original auth untouched — your Claude subscription or API key works as-is. The proxy window is killed when Claude Code exits.
 
 ---
 
 ## Managing API keys
 
-| Provider | Get your key |
-|----------|-------------|
-| MiMo | https://platform.xiaomimimo.com → API Keys (format: `sk-xxxxx`) |
-| Kimi | https://platform.kimi.ai/console/api-keys |
-| Claude | Managed by Claude Code — no key needed here |
-
-**View current keys:**
 ```powershell
+# View
 [Environment]::GetEnvironmentVariable("MIMO_API_KEY", "User")
-[Environment]::GetEnvironmentVariable("KIMI_API_KEY", "User")
-```
 
-**Update a key:**
-```powershell
+# Set or update
 [Environment]::SetEnvironmentVariable("MIMO_API_KEY", "sk-new-key", "User")
-```
 
-After updating, open a new terminal tab.
-
-**Remove a key:**
-```powershell
+# Remove
 [Environment]::SetEnvironmentVariable("MIMO_API_KEY", $null, "User")
 ```
 
+Open a new terminal tab after any change.
+
 ---
 
-## Custom port
+## Options
 
-The proxy defaults to port `8377`. Override it:
-
+**Custom port** (default: `8377`):
 ```powershell
 $env:CLAUDE_PROXY_PORT = "9000"
+claude-multi
+```
+
+**Custom routes file location** (default: `~/bin/routes.json`):
+```powershell
+$env:CLAUDE_PROXY_ROUTES = "C:\path\to\my-routes.json"
 claude-multi
 ```
 

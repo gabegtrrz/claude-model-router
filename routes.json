@@ -1,0 +1,18 @@
+{
+  "routes": [
+    {
+      "prefix": "mimo",
+      "name": "Xiaomi MiMo",
+      "host": "api.xiaomimimo.com",
+      "basePath": "/anthropic",
+      "apiKeyEnv": "MIMO_API_KEY"
+    },
+    {
+      "prefix": "kimi",
+      "name": "Moonshot Kimi",
+      "host": "api.moonshot.ai",
+      "basePath": "/anthropic",
+      "apiKeyEnv": "KIMI_API_KEY"
+    }
+  ]
+}
