@@ -22,6 +22,8 @@ try {
     host: r.host,
     basePath: r.basePath ?? "",
     apiKey: process.env[r.apiKeyEnv] ?? null,
+    apiKeyEnv: r.apiKeyEnv,
+    model: r.model ?? null,
     name: r.name ?? r.prefix,
   }));
 } catch (err) {
@@ -38,6 +40,7 @@ const routes = [
     host: "api.anthropic.com",
     basePath: "",
     apiKey: null,
+    model: null,
     name: "Anthropic",
   },
 ];
@@ -58,9 +61,20 @@ const server = createServer((req, res) => {
     const route = routes.find((r) => r.match(model));
     const targetPath = route.basePath + req.url;
 
+    // Rewrite model name if the route specifies a fixed model ID.
+    if (route.model && model !== route.model) {
+      try {
+        const parsed = JSON.parse(body);
+        parsed.model = route.model;
+        body = JSON.stringify(parsed);
+      } catch {}
+    }
+
     const headers = { ...req.headers };
     delete headers["host"];
+    delete headers["accept-encoding"]; // prevent gzip responses the proxy can't transparently forward
     headers["host"] = route.host;
+    headers["content-length"] = Buffer.byteLength(body).toString();
 
     // Only override auth for third-party providers.
     // For Anthropic, pass through whatever Claude Code sent (OAuth token, API key, etc.)
@@ -69,15 +83,35 @@ const server = createServer((req, res) => {
       headers["authorization"] = `Bearer ${route.apiKey}`;
     }
 
+    const displayModel = route.model && model !== route.model ? `${model} → ${route.model}` : model;
     if (model) {
-      process.stderr.write(`[proxy] ${model} → ${route.name} (${route.host})\n`);
+      process.stderr.write(`[proxy] ${displayModel} → ${route.name} (${route.host})\n`);
     }
 
     const proxyReq = httpsRequest(
       { hostname: route.host, port: 443, path: targetPath, method: req.method, headers },
       (proxyRes) => {
-        res.writeHead(proxyRes.statusCode, proxyRes.headers);
-        proxyRes.pipe(res);
+        const status = proxyRes.statusCode;
+        if (status >= 400) {
+          let errBody = "";
+          proxyRes.on("data", (chunk) => (errBody += chunk));
+          proxyRes.on("end", () => {
+            let label = `HTTP ${status}`;
+            try {
+              const parsed = JSON.parse(errBody);
+              const msg = parsed?.error?.message ?? parsed?.message;
+              const type = parsed?.error?.type ?? parsed?.type;
+              if (type) label += ` ${type}`;
+              if (msg) label += `: ${msg}`;
+            } catch {}
+            process.stderr.write(`[proxy] ${route.name} error — ${label}\n`);
+            res.writeHead(status, proxyRes.headers);
+            res.end(errBody);
+          });
+        } else {
+          res.writeHead(status, proxyRes.headers);
+          proxyRes.pipe(res);
+        }
       }
     );
 
@@ -96,7 +130,10 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`Claude model proxy on http://127.0.0.1:${PORT}`);
   console.log(`  Routes loaded from: ${routesPath}`);
   for (const r of configuredRoutes) {
-    const keyStatus = r.apiKey ? "key set" : "WARNING: no key";
+    if (!r.apiKey) {
+      console.error(`  [WARNING] ${r.name}: no API key — set env var ${r.apiKeyEnv} and restart`);
+    }
+    const keyStatus = r.apiKey ? "key set" : "NO KEY — requests will fail with 401";
     console.log(`  ${r.name.padEnd(20)} "${r.prefix}*" → ${r.host} (${keyStatus})`);
   }
   console.log(`  ${"Anthropic (fallback)".padEnd(20)} * → api.anthropic.com (passthrough auth)`);

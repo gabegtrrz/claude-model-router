@@ -5,13 +5,15 @@
       "name": "Xiaomi MiMo",
       "host": "api.xiaomimimo.com",
       "basePath": "/anthropic",
+      "model": "mimo-v2-pro",
       "apiKeyEnv": "MIMO_API_KEY"
     },
     {
       "prefix": "kimi",
       "name": "Moonshot Kimi",
-      "host": "api.moonshot.ai",
-      "basePath": "/anthropic",
+      "host": "api.kimi.com",
+      "basePath": "/coding",
+      "model": "kimi-for-coding",
       "apiKeyEnv": "KIMI_API_KEY"
     }
   ]
